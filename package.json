@@ -14,6 +14,7 @@
   "license": "ISC",
   "dependencies": {
     "blessed": "^0.1.81",
+    "dotenv": "^17.4.2",
     "ssh2": "^1.17.0"
   },
   "devDependencies": {
