@@ -1,80 +1,179 @@
 export interface GameFile {
-  name: string;
   content: string;
+  reveals?: string[];
 }
 
 export interface GameNode {
   id: string;
   name: string;
   status: string;
-  files: Record<string, string>; // path -> content
+  files: Record<string, string | GameFile>;
   connections: string[]; // array of node IDs
-  isLocked?: boolean;
-  unlockKeyword?: string;
-  unlockMessage?: string;
 }
 
 export const INITIAL_WORLD: Record<string, GameNode> = {
-  'relay-7': {
-    id: 'relay-7',
-    name: 'relay-7',
-    status: 'unstable',
-    connections: ['archive', 'lab'],
+  relay: {
+    id: "relay",
+    name: "relay",
+    status: "degraded",
+    connections: ["dock-1", "med-bay", "security", "feeding-zone", "hatchery"],
     files: {
-      'notes.txt': `If this relay is active,
-the blackout failed.
+      "day-1.log": `Transport successful.
 
--- [SIGNATURE REDACTED]`,
-      'logs/boot.log': `Relay recovery attempt #14 failed.
+DNA extraction stable.
 
-External connections unstable.
-[WARNING] Heartbeat timeout on primary channel.`
-    }
+Subject awake at 8:14 PM.
+
+Dr. Hale named him Echo.`,
+      "day-2.log": `Echo responds to sound.
+
+Follows movement.
+
+Security says he watches people too much.`,
+      "day-3.log": `South fence damaged.
+
+No breach.
+
+Echo missing for 11 minutes.
+
+Found near water tanks.
+
+Nobody saw him leave.`,
+      "day-4.log": `Handler Mason scratched.
+
+He made no sound before attack.
+
+Night patrol increased.`,
+      "day-5.log": `West dock lights failed again.
+
+Echo reacted when the siren started.
+
+He kept staring toward Dock 1.`,
+      "day-6.log": `Security moved transport cages near Dock 1.
+
+Nobody allowed there after midnight.`,
+      "day-7.log": {
+        content: `If anyone gets this...
+
+Lockdown failed.
+
+Manual override systems are responsive.
+
+Connect to med-bay to check the anomaly.`,
+        reveals: ["dock-1", "med-bay", "security"],
+      },
+    },
   },
-  'archive': {
-    id: 'archive',
-    name: 'archive',
-    status: 'degraded',
-    connections: ['relay-7'],
+
+  "dock-1": {
+    id: "dock-1",
+    name: "dock-1",
+    status: "unstable",
+    connections: ["relay", "med-bay", "security", "feeding-zone", "hatchery"],
     files: {
-      'incident.log': `03:14 AM
+      "transport.log": `Echo transported successfully.
 
-Containment lock disabled.
-Backup power offline.
-Sector 4 sealing failed.`,
-      'staff.msg': `We should never have opened Lab 6.
+Sedation unstable during storm.`,
+      "camera-feed.txt": `02:14 AM
 
-Only ATLAS remembers the old access keys.
-I hope they purged the mainframe.`
-    }
+Echo near loading gate.
+
+Not aggressive.
+
+Just waiting.
+
+02:16 AM
+
+Second movement detected outside floodlights.`,
+      "cage-report.txt": `Damage too high from ground level.`,
+    },
   },
-  'lab': {
-    id: 'lab',
-    name: 'lab',
-    status: 'quarantined',
-    connections: ['relay-7'],
-    isLocked: true,
-    unlockKeyword: 'atlas',
-    unlockMessage: `ACCESS GRANTED
-
-Warning:
-Biological signatures detected.
-[STATUS: CONTAINMENT BREACH ACTIVE]`,
+  "med-bay": {
+    id: "med-bay",
+    name: "med-bay",
+    status: "quarantined",
+    connections: ["relay", "dock-1", "security", "feeding-zone", "hatchery"],
     files: {
-      'experiment.log': `Subject Zero - Cognitive purge initiated.
-Biological activity spikes: 400%
-Neural map overlaying active terminal processes.
+      "blood-report.txt": `Healing speed increasing.
 
-If containment fails, trigger the terminal blackout immediately. Do not let it reach the relay.`,
-      'warning.msg': `Do not trust the relay.
-It is not transmitting to the outside.
-It is echoing.
-It wants us to connect.`,
-      'specimen-0.dat': `[CORRUPTED BIOLOGICAL TELEMETRY]
-██████████████████████████████
-Pulse: 0 bpm (constant)
-Brainwaves: Delta-Theta sync pattern
-Note: Terminal display is flickering in sync with the bio-sensor.`
-    }
-  }
+Temperature abnormal.
+
+Avoid direct eye contact during feeding.`,
+      "injury.log": `Mason refused treatment.
+
+Kept repeating:
+“She was watching the fence.”`,
+    },
+  },
+  security: {
+    id: "security",
+    name: "security",
+    status: "offline",
+    connections: ["relay", "dock-1", "med-bay", "feeding-zone", "hatchery"],
+    files: {
+      "night-watch.log": `02:11 AM
+
+Motion detected outside perimeter.
+
+Echo still inside enclosure.`,
+      "emergency.log": `Do NOT open north gate.
+
+Do NOT respond to sounds outside the vents.`,
+      "gate-bypass.txt": {
+        content: `Feeding zone relay systems offline.
+
+Connect to feeding-zone to check containment gates.`,
+        reveals: ["feeding-zone"],
+      },
+    },
+  },
+  "feeding-zone": {
+    id: "feeding-zone",
+    name: "feeding-zone",
+    status: "hazardous",
+    connections: ["relay", "dock-1", "med-bay", "security", "hatchery"],
+    files: {
+      "feeding.log": `Day 3
+
+He refused packaged meat again.
+
+Calmed down only after the storm started.`,
+      "hatchery-bypass.txt": {
+        content: `Hatchery containment lock active.
+
+Connect to hatchery to check the server logs.`,
+        reveals: ["hatchery"],
+      },
+    },
+  },
+  hatchery: {
+    id: "hatchery",
+    name: "hatchery",
+    status: "breached",
+    connections: ["relay", "dock-1", "med-bay", "security", "feeding-zone"],
+    files: {
+      "final.log": `We were wrong.
+
+The infant was never escaping.
+
+He was learning routes.
+
+Opening paths.
+
+Keeping us distracted.
+
+She was already here before transport day.`,
+      "tower-feed.txt": `03:14 AM
+
+Echo standing near outer fence.
+
+Looking toward the trees.
+
+Waiting.
+
+Movement detected behind him.
+
+Feed lost.`,
+    },
+  },
 };

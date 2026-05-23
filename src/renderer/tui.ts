@@ -4,6 +4,7 @@ import { GameSession } from '../engine/game.js';
 export function setupTerminalUI(stream: any, ptyInfo: any, session: any) {
   const game = new GameSession();
   let isExecuting = false;
+  let screenDestroyed = false;
 
   const screen = blessed.screen({
     autoPadding: true,
@@ -15,7 +16,7 @@ export function setupTerminalUI(stream: any, ptyInfo: any, session: any) {
     warnings: false,
   });
 
-  screen.title = 'VOID — Terminal Mystery World';
+  screen.title = 'ORIGIN — Remote Relay';
 
   // main container
   const container = blessed.box({
@@ -46,7 +47,7 @@ export function setupTerminalUI(stream: any, ptyInfo: any, session: any) {
     tags: true,
   });
 
-  // 3. Log/Output Body Component
+  // Log/Output Body Component
   const logBox = blessed.box({
     parent: container,
     top: 3,
@@ -55,6 +56,7 @@ export function setupTerminalUI(stream: any, ptyInfo: any, session: any) {
     width: '100%',
     scrollable: true,
     alwaysScroll: true,
+    mouse: true, // Enable mouse wheel scrolling
     scrollbar: {
       ch: '░',
       style: {
@@ -68,7 +70,7 @@ export function setupTerminalUI(stream: any, ptyInfo: any, session: any) {
     tags: true,
   });
 
-  // 4. Input Prompt Box
+  // Input Prompt Box
   const inputContainer = blessed.box({
     parent: container,
     bottom: 0,
@@ -95,7 +97,7 @@ export function setupTerminalUI(stream: any, ptyInfo: any, session: any) {
     height: 1,
     content: '>',
     style: {
-      fg: '#00ff00',
+      fg: '#ff3333', // vibrant red for threat level
       bold: true,
     },
   });
@@ -116,6 +118,7 @@ export function setupTerminalUI(stream: any, ptyInfo: any, session: any) {
 
   // Function to update the Header details based on current node
   function updateHeader() {
+    if (screenDestroyed) return;
     const node = game.getCurrentNode();
     let statusFormatted = '';
     
@@ -129,17 +132,25 @@ export function setupTerminalUI(stream: any, ptyInfo: any, session: any) {
       case 'degraded':
         statusFormatted = '{cyan-fg}DEGRADED{/cyan-fg}';
         break;
+      case 'offline':
+        statusFormatted = '{cyan-fg}OFFLINE{/cyan-fg}';
+        break;
+      case 'hazardous':
+      case 'breached':
+        statusFormatted = '{red-fg}{bold}' + node.status.toUpperCase() + '{/bold}{/red-fg}';
+        break;
       default:
         statusFormatted = `{green-fg}${node.status.toUpperCase()}{/green-fg}`;
     }
 
-    const headerText = ` ▰▰▰ {bold}VOID MAINFLOW{/bold} ▰▰▰    {grey-fg}NODE:{/grey-fg} {green-fg}{bold}${node.name.toUpperCase()}{/bold}{/green-fg}    {grey-fg}STATUS:{/grey-fg} ${statusFormatted}    {grey-fg}SYS_SECURE:{/grey-fg} {green-fg}OK{/green-fg}`;
+    const headerText = ` ▰▰▰ {bold}ORIGIN REMOTE RELAY{/bold} ▰▰▰    {grey-fg}AREA:{/grey-fg} {green-fg}{bold}${node.name.toUpperCase()}{/bold}{/green-fg}    {grey-fg}STATUS:{/grey-fg} ${statusFormatted}    {grey-fg}ENCRYPT_SECURE:{/grey-fg} {green-fg}ACTIVE{/green-fg}`;
     header.setContent(headerText);
     screen.render();
   }
 
   // Print function passed to command parser
   async function print(text: string, options?: { delay?: number; color?: string; style?: string }) {
+    if (screenDestroyed) return;
     let content = text;
     if (options?.color) {
       content = `${options.color}${text}\x1b[39m`;
@@ -156,12 +167,14 @@ export function setupTerminalUI(stream: any, ptyInfo: any, session: any) {
 
   // Clear output screen
   function clearLogs() {
+    if (screenDestroyed) return;
     logBox.setContent('');
     screen.render();
   }
 
   // Resize handler
   function triggerResize() {
+    if (screenDestroyed) return;
     updateHeader();
     screen.render();
   }
@@ -169,7 +182,7 @@ export function setupTerminalUI(stream: any, ptyInfo: any, session: any) {
   // Listen to SSH window-change event
   session.on('window-change', (accept: any, reject: any, info: any) => {
     ptyInfo = info;
-    if (screen) {
+    if (screen && !screenDestroyed) {
       screen.terminal = ptyInfo.term || 'xterm-256color';
       
       // Update screen dimension
@@ -186,7 +199,7 @@ export function setupTerminalUI(stream: any, ptyInfo: any, session: any) {
 
   // Textbox submit callback
   inputField.on('submit', async (value: string) => {
-    if (isExecuting) return;
+    if (isExecuting || screenDestroyed) return;
     
     const commandText = value.trim();
     inputField.clearValue();
@@ -200,41 +213,88 @@ export function setupTerminalUI(stream: any, ptyInfo: any, session: any) {
     isExecuting = true;
     
     // Echo the command typed by the user to the log box
-    await print(`> ${commandText}`, { color: '\x1b[90m' }); // dim grey
+    await print(`> ${commandText}`, { color: '\x1b[37m' }); // light grey
 
     try {
-      await game.executeCommand(commandText, print, clearLogs, triggerResize);
+      await game.executeCommand(
+        commandText,
+        print,
+        clearLogs,
+        triggerResize,
+        () => {
+          screenDestroyed = true;
+          screen.destroy();
+          stream.end();
+        }
+      );
     } catch (err: any) {
       await print(`System Error: ${err.message}`, { color: '\x1b[31m' });
     } finally {
-      isExecuting = false;
-      await print(''); // spacing
+      if (screen && !screenDestroyed) {
+        isExecuting = false;
+        await print(''); // spacing
+        inputField.focus();
+        screen.render();
+      }
+    }
+  });
+
+  // Auto-focus textbox if user clicks anywhere on log area
+  screen.on('click', () => {
+    if (!isExecuting && !screenDestroyed) {
       inputField.focus();
+    }
+  });
+
+  // Keypress event handler with exclusion for scroll keys
+  screen.on('keypress', (ch, key) => {
+    if (key && ['pageup', 'pagedown', 'up', 'down', 'prior', 'next'].includes(key.name)) {
+      return; // let these scroll keys work without stealing focus
+    }
+    if (!isExecuting && !screenDestroyed && (screen as any).focused !== inputField) {
+      inputField.focus();
+    }
+  });
+
+  // Global key bindings for scrolling the logBox
+  screen.key(['pageup', 'prior'], () => {
+    if (!screenDestroyed) {
+      logBox.scroll(-2);
       screen.render();
     }
   });
 
-  // Auto-focus textbox if user clicks anywhere on log area or when keys pressed
-  screen.on('click', () => {
-    if (!isExecuting) {
-      inputField.focus();
+  screen.key(['pagedown', 'next'], () => {
+    if (!screenDestroyed) {
+      logBox.scroll(2);
+      screen.render();
     }
   });
 
-  screen.on('keypress', () => {
-    if (!isExecuting && (screen as any).focused !== inputField) {
-      inputField.focus();
+  screen.key(['S-up'], () => {
+    if (!screenDestroyed) {
+      logBox.scroll(-2);
+      screen.render();
+    }
+  });
+
+  screen.key(['S-down'], () => {
+    if (!screenDestroyed) {
+      logBox.scroll(2);
+      screen.render();
     }
   });
 
   // Handle Ctrl+C to terminate terminal session cleanly
   screen.key(['C-c'], () => {
+    screenDestroyed = true;
     screen.destroy();
     stream.end();
   });
 
   // Handle stream end/close cleanup
   stream.on('close', () => {
+    screenDestroyed = true;
     screen.destroy();
   });
 
@@ -243,32 +303,33 @@ export function setupTerminalUI(stream: any, ptyInfo: any, session: any) {
     isExecuting = true;
     updateHeader();
 
-    await print('Establishing secure relay connection...', { color: '\x1b[36m', delay: 400 });
-    await print('Handshake accepted by void.shitanshu.dev.', { color: '\x1b[32m', delay: 300 });
-    await print('');
-    await print('██╗   ██╗ ██████╗ ██╗██████╗ ', { color: '\x1b[31m', delay: 50 });
-    await print('██║   ██║██╔═══██╗██║██╔══██╗', { color: '\x1b[31m', delay: 50 });
-    await print('██║   ██║██║   ██║██║██║  ██║', { color: '\x1b[31m', delay: 50 });
-    await print('╚██╗ ██╔╝██║   ██║██║██║  ██║', { color: '\x1b[31m', delay: 50 });
-    await print(' ╚████╔╝ ╚██████╔╝██║██████╔╝', { color: '\x1b[31m', delay: 50 });
-    await print('  ╚═══╝   ╚═════╝ ╚═╝╚══════╝ ', { color: '\x1b[31m', delay: 200 });
-    await print('');
-    await print('VOID RELAY NETWORK v0.3', { color: '\x1b[1m', delay: 200 });
-    await print('');
-    await print('WARNING:', { color: '\x1b[33m', delay: 100 });
-    await print('3 relay nodes unreachable.', { color: '\x1b[33m', delay: 150 });
+    await print('Establishing relay...', { color: '\x1b[36m', delay: 300 });
+    await print('Connection accepted.', { color: '\x1b[32m', delay: 200 });
     await print('');
     
-    // Generate an authentic random session hex ID
-    const randomSessionId = Math.floor(0x10000 + Math.random() * 0xF0000).toString(16).toUpperCase();
-    await print(`Session ID: #${randomSessionId}`, { color: '\x1b[90m', delay: 200 });
+    // Cinematic ascii title
+    await print(' ██████╗ ██████╗ ██╗ ██████╗ ██╗███╗   ██╗', { color: '\x1b[1;31m', delay: 40 });
+    await print('██╔═══██╗██╔══██╗██║██╔════╝ ██║████╗  ██║', { color: '\x1b[1;31m', delay: 40 });
+    await print('██║   ██║██████╔╝██║██║  ███╗██║██╔██╗ ██║', { color: '\x1b[1;31m', delay: 40 });
+    await print('██║   ██║██╔══██╗██║██║   ██║██║██║╚██╗██║', { color: '\x1b[1;31m', delay: 40 });
+    await print('╚██████╔╝██║  ██║██║╚██████╔╝██║██║ ╚████║', { color: '\x1b[1;31m', delay: 40 });
+    await print(' ╚═════╝ ╚═╝  ╚═╝╚═╝ ╚═════╝ ╚═╝╚═╝  ╚═══╝', { color: '\x1b[1;31m', delay: 100 });
     await print('');
-    await print("Type 'help' to review basic commands.", { color: '\x1b[36m', delay: 100 });
+    await print('ORIGIN REMOTE RELAY', { color: '\x1b[1;37m', delay: 150 });
+    await print('');
+    await print('Island response unavailable.', { color: '\x1b[33m', delay: 150 });
+    await print('Last contact: 7 days ago.', { color: '\x1b[33m', delay: 150 });
+    await print('');
+    await print('One specimen missing.', { color: '\x1b[1;31m', delay: 200 });
+    await print('');
+    await print("Type 'help'", { color: '\x1b[36m', delay: 100 });
     await print('');
 
     isExecuting = false;
-    inputField.focus();
-    screen.render();
+    if (!screenDestroyed) {
+      inputField.focus();
+      screen.render();
+    }
   }
 
   runIntro();

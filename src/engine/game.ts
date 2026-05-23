@@ -1,9 +1,9 @@
 import { INITIAL_WORLD, GameNode } from '../world/data.js';
 
 export class GameSession {
-  currentNodeId: string = 'relay-7';
-  unlockedNodes: Set<string> = new Set(['relay-7', 'archive']);
+  currentNodeId: string = 'relay';
   world: Record<string, GameNode>;
+  discoveredNodes: string[] = ['relay'];
   
   constructor() {
     // Deep clone INITIAL_WORLD to have fresh state per session
@@ -18,7 +18,8 @@ export class GameSession {
     rawInput: string,
     print: (text: string, options?: { delay?: number; color?: string; style?: string }) => Promise<void>,
     clear: () => void,
-    triggerResize: () => void
+    triggerResize: () => void,
+    terminate: () => void
   ): Promise<void> {
     const input = rawInput.trim();
     if (!input) return;
@@ -31,11 +32,11 @@ export class GameSession {
       case 'help':
         await print('AVAILABLE COMMANDS:', { color: '\x1b[36m' });
         await print('  help              Display this guidance manual.');
-        await print('  ls [dir]          List files in the current node directory.');
-        await print('  cat <file>        Read the contents of a decrypted file.');
-        await print('  scan              Scan local networks for nearby active nodes.');
-        await print('  connect <node>    Establish a secure relay link to another node.');
-        await print('  unlock <keyword>  Inject decryption clearance keyword.');
+        await print('  logs              Show the 7 days of archived logs.');
+        await print('  scan              Scan and list available areas.');
+        await print('  connect <area>    Connect to an available area terminal.');
+        await print('  ls                List files in the current area.');
+        await print('  cat <file>        Read the contents of a file.');
         await print('  clear             Purge screen output logs.');
         break;
 
@@ -43,58 +44,29 @@ export class GameSession {
         clear();
         break;
 
+      case 'logs':
+        await print('ARCHIVED SYSTEM LOGS', { color: '\x1b[1;36m' });
+        await print('--------------------', { color: '\x1b[90m' });
+        await print('day-1.log', { color: '\x1b[37m', delay: 10 });
+        await print('day-2.log', { color: '\x1b[37m', delay: 10 });
+        await print('day-3.log', { color: '\x1b[37m', delay: 10 });
+        await print('day-4.log', { color: '\x1b[37m', delay: 10 });
+        await print('day-5.log', { color: '\x1b[37m', delay: 10 });
+        await print('day-6.log', { color: '\x1b[37m', delay: 10 });
+        await print('day-7.log', { color: '\x1b[37m', delay: 10 });
+        await print('--------------------', { color: '\x1b[90m' });
+        await print("Use 'cat <file>' to read the log contents.");
+        break;
+
       case 'ls': {
         const node = this.getCurrentNode();
-        const targetDir = args[0] ? args[0].replace(/\/$/, '') : '';
+        const files = Object.keys(node.files);
         
-        // Find files and directories
-        const filesInDir = new Set<string>();
-        const dirsInDir = new Set<string>();
-
-        for (const filePath of Object.keys(node.files)) {
-          if (targetDir === '') {
-            // Root directory listing
-            if (filePath.includes('/')) {
-              const topDir = filePath.split('/')[0];
-              dirsInDir.add(topDir);
-            } else {
-              filesInDir.add(filePath);
-            }
-          } else {
-            // Subdirectory listing
-            const prefix = targetDir + '/';
-            if (filePath.startsWith(prefix)) {
-              const relativePath = filePath.substring(prefix.length);
-              if (relativePath.includes('/')) {
-                const subDir = relativePath.split('/')[0];
-                dirsInDir.add(subDir);
-              } else {
-                filesInDir.add(relativePath);
-              }
-            }
-          }
-        }
-
-        if (targetDir !== '' && dirsInDir.size === 0 && filesInDir.size === 0) {
-          // Check if it's a file
-          if (node.files[targetDir]) {
-            await print(targetDir, { color: '\x1b[37m' });
-          } else {
-            await print(`ls: ${targetDir}: No such directory`, { color: '\x1b[31m' });
-          }
-          break;
-        }
-
-        const totalItems = dirsInDir.size + filesInDir.size;
-        await print(`total ${totalItems}`);
-
-        // Print directories first
-        for (const dir of Array.from(dirsInDir).sort()) {
-          await print(`drwxr-xr-x   -   \x1b[34m${dir}/\x1b[39m`);
-        }
-        // Print files next
-        for (const file of Array.from(filesInDir).sort()) {
-          await print(`-rw-r--r--   -   \x1b[37m${file}\x1b[39m`);
+        await print(`total ${files.length}`);
+        for (const file of files.sort()) {
+          const fileObj = node.files[file];
+          const fileLength = typeof fileObj === 'string' ? fileObj.length : fileObj.content.length;
+          await print(`-rw-r--r--   1 root  root   ${fileLength} May 23 16:50 \x1b[37m${file}\x1b[39m`);
         }
         break;
       }
@@ -106,164 +78,176 @@ export class GameSession {
         }
 
         const node = this.getCurrentNode();
-        const filePath = args[0];
+        const fileName = args[0].toLowerCase();
 
-        // Check if path is a directory
-        const isDir = Object.keys(node.files).some(p => p.startsWith(filePath + '/'));
-        if (isDir) {
-          await print(`cat: ${filePath}: Is a directory`, { color: '\x1b[31m' });
+        // Allow reading logs globally from anywhere, or local files in the current node
+        let fileObj: any = undefined;
+
+        // Try exact match in current node
+        const exactMatch = Object.keys(node.files).find(f => f.toLowerCase() === fileName);
+        if (exactMatch) {
+          fileObj = node.files[exactMatch];
+        }
+
+        // If not found and looks like a day log, fallback to relay
+        if (fileObj === undefined && fileName.startsWith('day-') && fileName.endsWith('.log')) {
+          const relayNode = this.world['relay'];
+          const logMatch = Object.keys(relayNode.files).find(f => f.toLowerCase() === fileName);
+          if (logMatch) {
+            fileObj = relayNode.files[logMatch];
+          }
+        }
+
+        if (fileObj === undefined) {
+          await print(`cat: ${args[0]}: No such file or directory`, { color: '\x1b[31m' });
           break;
         }
 
-        const content = node.files[filePath];
-        if (content === undefined) {
-          await print(`cat: ${filePath}: No such file or directory`, { color: '\x1b[31m' });
-          break;
+        let contentStr = '';
+        let reveals: string[] | undefined = undefined;
+
+        if (typeof fileObj === 'string') {
+          contentStr = fileObj;
+        } else {
+          contentStr = fileObj.content;
+          reveals = fileObj.reveals;
         }
 
-        // Print contents with a slightly fast typing delay for immersion
-        const lines = content.split('\n');
+        // Print contents with immersive fast typewriter effect
+        const lines = contentStr.split('\n');
         for (const line of lines) {
-          await print(line, { delay: 10 });
+          await print(line, { delay: 15 });
+        }
+
+        // --- PROGRESSION TRIGGERS ---
+        if (reveals && reveals.length > 0) {
+          let newlyRevealed = false;
+          for (const nodeId of reveals) {
+            if (!this.discoveredNodes.includes(nodeId)) {
+              this.discoveredNodes.push(nodeId);
+              newlyRevealed = true;
+            }
+          }
+          if (newlyRevealed) {
+            await print('');
+            await print(`>> REMOTE SYSTEM CHANNELS DETECTED: ${reveals.join(', ')}`, { color: '\x1b[32m', delay: 100 });
+            await print('>> Connection paths now available in system locator.', { color: '\x1b[32m', delay: 100 });
+          }
+        }
+
+        // --- SPECIAL CINEMATIC ENDING ---
+        if (fileName === 'tower-feed.txt' && this.currentNodeId === 'hatchery') {
+          await print('');
+          await new Promise(resolve => setTimeout(resolve, 1500));
+          await print('!!! WARNING: TELEMETRY SIGNAL LOST !!!', { color: '\x1b[5;31m', delay: 100 });
+          await print('Connection closed by remote host.', { color: '\x1b[31m', delay: 100 });
+          await print('');
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          clear();
+          
+          await print('==================================================', { color: '\x1b[31m' });
+          await print('               CONNECTION TERMINATED              ', { color: '\x1b[1;31m', delay: 200 });
+          await print('==================================================', { color: '\x1b[31m' });
+          await print('');
+          await print('           CHAPTER 1 COMPLETE             ', { color: '\x1b[1;37m', delay: 200 });
+          await print('');
+          await print('           THE ORIGIN FILES               ', { color: '\x1b[1;32m', delay: 200 });
+          await print('           Book coming soon.              ', { color: '\x1b[3;90m', delay: 200 });
+          await print('');
+          await print('==================================================', { color: '\x1b[31m' });
+          
+          await new Promise(resolve => setTimeout(resolve, 4000));
+          if (terminate) {
+            terminate();
+          }
         }
         break;
       }
 
       case 'scan': {
-        await print('Initiating ping sequence across local relay network...', { delay: 20 });
-        await print('Transmitting handshake packets...');
-        await print('----------------------------------------------------');
+        await print('Initiating ping sequence across local area network...', { delay: 40 });
+        await print('Transmitting handshake packets to remote systems...');
+        await print('----------------------------------------------------', { color: '\x1b[90m' });
         
-        const node = this.getCurrentNode();
-        await print('DETECTED NODES:', { color: '\x1b[36m' });
+        await print('AVAILABLE AREAS:', { color: '\x1b[1;36m' });
         await print('');
 
-        for (const connId of node.connections) {
-          const targetNode = this.world[connId];
-          if (!targetNode) continue;
-
-          if (targetNode.isLocked) {
-            await print(`  \x1b[30;1munknown\x1b[39;22m        [STATUS: ENCRYPTED / SECURE LINK REQUIRED]`);
-          } else {
-            const statusColor = targetNode.status === 'unstable' ? '\x1b[33m' : targetNode.status === 'quarantined' ? '\x1b[31m' : '\x1b[32m';
+        // Always print discovered areas in strict chronological order
+        const chronologicalOrder = ['relay', 'dock-1', 'med-bay', 'security', 'feeding-zone', 'hatchery'];
+        for (const nodeId of chronologicalOrder) {
+          if (this.discoveredNodes.includes(nodeId)) {
+            const targetNode = this.world[nodeId];
             const isCurrent = targetNode.id === this.currentNodeId ? ' (CURRENT)' : '';
-            await print(`  \x1b[32m${targetNode.name}\x1b[39m       [STATUS: ${statusColor}${targetNode.status.toUpperCase()}\x1b[39m]${isCurrent}`);
+            let statusColor = '\x1b[32m'; // green
+            if (targetNode.status === 'unstable') statusColor = '\x1b[33m'; // yellow
+            if (targetNode.status === 'quarantined') statusColor = '\x1b[31m'; // red
+            if (targetNode.status === 'hazardous' || targetNode.status === 'breached') statusColor = '\x1b[1;31m'; // bold red
+            if (targetNode.status === 'degraded' || targetNode.status === 'offline') statusColor = '\x1b[36m'; // cyan
+
+            await print(`  \x1b[1;32m${targetNode.name.padEnd(15)}\x1b[0m [STATUS: ${statusColor}${targetNode.status.toUpperCase()}\x1b[0m]${isCurrent}`, { delay: 20 });
           }
         }
         
-        // Also always print the current node in scan if it's not in connections list
-        if (!node.connections.includes(this.currentNodeId)) {
-          const statusColor = node.status === 'unstable' ? '\x1b[33m' : node.status === 'quarantined' ? '\x1b[31m' : '\x1b[32m';
-          await print(`  \x1b[32m${node.name}\x1b[39m       [STATUS: ${statusColor}${node.status.toUpperCase()}\x1b[39m] (CURRENT)`);
-        }
-
-        await print('----------------------------------------------------');
+        await print('----------------------------------------------------', { color: '\x1b[90m' });
         break;
       }
 
       case 'connect': {
         if (args.length === 0) {
-          await print('connect: missing target node', { color: '\x1b[31m' });
+          await print('connect: missing target area', { color: '\x1b[31m' });
           break;
         }
 
-        const targetName = args[0].toLowerCase();
-        const node = this.getCurrentNode();
-        
-        // Find if targetName matches any node in connections
-        // Note: if node is locked, its name might appear as 'unknown' in scan,
-        // but they can connect to its ID if unlocked.
+        // Clean target name: allow hyphenated or spaces (e.g. "dock-1" or "dock 1")
+        const targetName = args.join('-').toLowerCase();
+
         let targetId = '';
-        for (const connId of node.connections) {
-          const target = this.world[connId];
-          if (target && (target.id === targetName || target.name === targetName)) {
-            targetId = target.id;
+        // Look up by ID or Name within discovered nodes only
+        for (const nodeId of this.discoveredNodes) {
+          if (nodeId === targetName || this.world[nodeId].name.toLowerCase() === targetName) {
+            targetId = nodeId;
             break;
           }
         }
 
-        // If targetName is 'unknown' and they try to connect to it
-        if (targetName === 'unknown') {
-          await print('connect: cannot route to encrypted network target.', { color: '\x1b[31m' });
-          await print('Clearance code required to reveal node signature.');
-          break;
-        }
-
         if (!targetId) {
-          await print(`connect: node '${targetName}' unreachable from current relay.`, { color: '\x1b[31m' });
+          await print(`connect: area '${targetName}' unreachable or does not exist.`, { color: '\x1b[31m' });
           break;
         }
 
         const targetNode = this.world[targetId];
-        if (targetNode.isLocked) {
-          await print(`Initiating connection to '${targetNode.name}'...`, { delay: 10 });
-          await print('ERROR: SECURE LINK FAILURE', { color: '\x1b[31m' });
-          await print(`Node '${targetNode.name}' is quarantined. Authentication clearance key required.`, { color: '\x1b[33m' });
-          break;
-        }
 
-        // Animation!
+        // Immersive loading animation
         clear();
-        await print(`\x1b[5mEstablishing secure link to ${targetNode.name}...\x1b[25m`, { color: '\x1b[36m' });
-        await print('[          ]  0% Initiating handshake...', { delay: 100 });
+        await print(`Establishing secure link to ${targetNode.name.toUpperCase()}...`, { color: '\x1b[36m' });
+        await print('[          ]  0% Initiating handshake...', { delay: 150 });
         await print('[===       ] 30% Syncing terminal protocols...', { delay: 150 });
-        await print('[======    ] 60% Bypassing relay firewall...', { delay: 150 });
+        await print('[======    ] 60% Bypassing area firewall...', { delay: 150 });
         await print('[========= ] 90% Mounting remote filesystem...', { delay: 150 });
         await print('[==========] 100% SECURE CONNECTION ESTABLISHED.', { color: '\x1b[32m', delay: 100 });
         
-        // Wait a small bit
-        await new Promise(resolve => setTimeout(resolve, 300));
+        await new Promise(resolve => setTimeout(resolve, 400));
         
         // Switch node!
-        this.currentNodeId = targetNode.id;
+        this.currentNodeId = targetId;
         clear();
-        triggerResize(); // Redraw TUI structures for new node context
+        triggerResize(); // Redraw TUI headers and borders
         
-        await print(`Connected to node: ${targetNode.name.toUpperCase()}`, { color: '\x1b[32m' });
-        await print(`Status: ${targetNode.status.toUpperCase()}`, { color: targetNode.status === 'unstable' ? '\x1b[33m' : targetNode.status === 'quarantined' ? '\x1b[31m' : '\x1b[32m' });
-        await print('----------------------------------------------------');
-        await print("Type 'ls' to explore node filesystem or 'help' for assistance.");
-        break;
-      }
+        let statusColor = '\x1b[32m';
+        if (targetNode.status === 'unstable') statusColor = '\x1b[33m';
+        if (targetNode.status === 'quarantined') statusColor = '\x1b[31m';
+        if (targetNode.status === 'hazardous' || targetNode.status === 'breached') statusColor = '\x1b[1;31m';
+        if (targetNode.status === 'degraded' || targetNode.status === 'offline') statusColor = '\x1b[36m';
 
-      case 'unlock': {
-        if (args.length === 0) {
-          await print('unlock: missing clearance keyword', { color: '\x1b[31m' });
-          break;
-        }
-
-        const keyword = args[0].toLowerCase();
-        
-        // Check which node can be unlocked with this keyword
-        let unlockedAny = false;
-        for (const nodeId of Object.keys(this.world)) {
-          const targetNode = this.world[nodeId];
-          if (targetNode.isLocked && targetNode.unlockKeyword === keyword) {
-            targetNode.isLocked = false;
-            unlockedAny = true;
-            this.unlockedNodes.add(nodeId);
-            
-            // Dramatic unlock text
-            await print('Attempting decryption using clearance key...', { delay: 30 });
-            await print('Processing credential hash...');
-            await print('..................................................', { delay: 10 });
-            await print(targetNode.unlockMessage || 'ACCESS GRANTED', { color: '\x1b[32m', delay: 20 });
-            break;
-          }
-        }
-
-        if (!unlockedAny) {
-          await print('Attempting decryption using clearance key...', { delay: 30 });
-          await print('Processing credential hash...');
-          await print('..................................................', { delay: 10 });
-          await print('ERROR: ACCESS KEY DECRYPTION FAILED', { color: '\x1b[31m' });
-          await print('Warning: Unauthorized access attempt has been logged.', { color: '\x1b[33m' });
-        }
+        await print(`CONNECTED TO: ${targetNode.name.toUpperCase()}`, { color: '\x1b[1;32m' });
+        await print(`STATUS: ${targetNode.status.toUpperCase()}`, { color: statusColor });
+        await print('----------------------------------------------------', { color: '\x1b[90m' });
+        await print("Type 'ls' to explore filesystem or 'help' for instructions.");
         break;
       }
 
       default:
-        await print(`void: command not found: ${command}. Type 'help' for instructions.`, { color: '\x1b[31m' });
+        await print(`origin: command not found: ${command}. Type 'help' for instructions.`, { color: '\x1b[31m' });
         break;
     }
   }
