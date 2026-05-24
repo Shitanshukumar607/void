@@ -48,6 +48,9 @@ export class GameSession {
         return this.handleScan(print);
       case "connect":
         return this.handleConnect(args, print, clear, triggerResize);
+      case "quit":
+      case "exit":
+        return terminate();
       default:
         return this.handleUnknown(command, print);
     }
@@ -62,6 +65,7 @@ export class GameSession {
     await print("  ls                List files in the current area.");
     await print("  cat <file>        Read the contents of a file.");
     await print("  clear             Purge screen output logs.");
+    await print("  quit              Disconnect from the terminal.");
   }
 
   private async handleLogs(print: PrintFn): Promise<void> {
