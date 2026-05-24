@@ -33,7 +33,7 @@ jobs:
             git pull origin main
             npm install
             npm run build
-            pm2 restart void || pm2 start dist/index.js --name void
+            pm2 restart origin || pm2 start dist/index.js --name origin
             pm2 save
 
           EOF
