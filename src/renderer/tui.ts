@@ -192,16 +192,38 @@ function setupEventHandlers(
 ) {
   // Window change
   session.on("window-change", (accept: any, reject: any, info: any) => {
-    state.ptyInfo = info;
+    const prevCols = state.ptyInfo?.cols;
+    const prevRows = state.ptyInfo?.rows;
+    const nextCols =
+      typeof info?.cols === "number" && info.cols > 0 ? info.cols : prevCols;
+    const nextRows =
+      typeof info?.rows === "number" && info.rows > 0 ? info.rows : prevRows;
+
+    state.ptyInfo = {
+      ...(state.ptyInfo || {}),
+      ...info,
+      cols: nextCols,
+      rows: nextRows,
+    };
+
+    if (
+      !nextCols ||
+      !nextRows ||
+      (prevCols === nextCols && prevRows === nextRows)
+    ) {
+      if (accept) accept();
+      return;
+    }
+
     if (screen && !state.screenDestroyed) {
       screen.terminal = info.term || "xterm-256color";
       if (stream) {
-        stream.columns = info.cols;
-        stream.rows = info.rows;
+        stream.columns = nextCols;
+        stream.rows = nextRows;
       }
       const program = screen.program as any;
       if (program && typeof program.resize === "function") {
-        program.resize(info.cols, info.rows);
+        program.resize(nextCols, nextRows);
       }
       screen.alloc();
       triggerResize();
