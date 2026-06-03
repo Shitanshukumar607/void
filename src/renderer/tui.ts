@@ -195,10 +195,14 @@ function setupEventHandlers(
     state.ptyInfo = info;
     if (screen && !state.screenDestroyed) {
       screen.terminal = info.term || "xterm-256color";
-      screen.program.cols = info.cols;
-      screen.program.rows = info.rows;
-      screen.cols = info.cols;
-      screen.rows = info.rows;
+      if (stream) {
+        stream.columns = info.cols;
+        stream.rows = info.rows;
+      }
+      const program = screen.program as any;
+      if (program && typeof program.resize === "function") {
+        program.resize(info.cols, info.rows);
+      }
       screen.alloc();
       triggerResize();
     }
